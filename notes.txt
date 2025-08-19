@@ -1,0 +1,5 @@
+# Run training process
+docker build -t plant-disease-train:latest .
+docker run --gpus all \
+  -v $(pwd)/outputs:/workspace/outputs \
+  -it --rm plant-disease-train:latest

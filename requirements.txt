@@ -1,0 +1,9 @@
+torch>=2.0
+torchvision
+timm
+pandas
+numpy
+einops
+scikit-learn
+matplotlib
+Pillow
