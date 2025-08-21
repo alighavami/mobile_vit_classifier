@@ -1,117 +1,149 @@
+# train.py
 import os
 import argparse
-import torch
+import random
 import numpy as np
+import torch
+from torch import optim
+from torch.optim.lr_scheduler import CosineAnnealingLR, StepLR, ReduceLROnPlateau
 from torch.utils.data import DataLoader
-from torchvision import transforms
+
 from models.mobilevit import MobileViTClassifier
 from datasets.plant_dataset import PlantDataset
-from utils.trainer import trainer
+from utils.transformrs import build_transforms
+from utils.trainer import trainer as Trainer
 
-
-
-# Ensure reproducibility
-torch.manual_seed(42)
-np.random.seed(42)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(42)
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train MobileViT for Plant Disease")
-    parser.add_argument('--data-dir', type=str, default='data/PlantVillage')
-    parser.add_argument('--batch-size', type=int, default=16)
-    parser.add_argument('--epochs', type=int, default=15)
-    parser.add_argument('--resume', type=str, default=None, help='Path to checkpoint to resume from')
-    return parser.parse_args()
+    p = argparse.ArgumentParser(description="Train MobileViT for Plant Disease Classification")
+
+    # data
+    p.add_argument('--data-dir', type=str, default='data/PlantVillage')
+    p.add_argument('--train-split', type=str, default='train')
+    p.add_argument('--val-split', type=str, default='test')
+
+    # model / input
+    p.add_argument('--img-size', type=int, default=224)
+    p.add_argument('--variant', type=str, default='small', choices=['small'])  # placeholder if you add more
+    p.add_argument('--pretrained', action='store_true')  # reserved flag if you add pretrained later
+
+    # training
+    p.add_argument('--epochs', type=int, default=50)
+    p.add_argument('--batch-size', type=int, default=64)
+    p.add_argument('--lr', type=float, default=3e-4)
+    p.add_argument('--weight-decay', type=float, default=1e-4)
+    p.add_argument('--optimizer', type=str, default='adamw', choices=['adamw', 'adam', 'sgd'])
+    p.add_argument('--scheduler', type=str, default='cosine', choices=['cosine', 'step', 'plateau', 'none'])
+    p.add_argument('--step-size', type=int, default=10)
+    p.add_argument('--gamma', type=float, default=0.5)
+
+    # stability & speed
+    p.add_argument('--amp', action='store_true', help='enable mixed precision')
+    p.add_argument('--accum-steps', type=int, default=1)
+    p.add_argument('--grad-clip', type=float, default=1.0)
+    p.add_argument('--early-stop', type=int, default=0, help='patience; 0 disables')
+    p.add_argument('--workers', type=int, default=4)
+    p.add_argument('--pin-memory', action='store_true')
+    p.add_argument('--use-class-weights', action='store_true')
+
+    # ckpts / resume
+    p.add_argument('--resume', type=str, default=None)
+    p.add_argument('--save-every', type=int, default=0, help='save epoch checkpoints; 0 => only best/last')
+
+    # misc
+    p.add_argument('--seed', type=int, default=42)
+
+    return p.parse_args()
+
+
+def set_seed(seed: int = 42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = False
+    torch.backends.cudnn.benchmark = True
+
+
+def build_optimizer(params, name: str, lr: float, weight_decay: float, momentum: float = 0.9):
+    name = name.lower()
+    if name == 'adamw':
+        return optim.AdamW(params, lr=lr, weight_decay=weight_decay)
+    if name == 'adam':
+        return optim.Adam(params, lr=lr, weight_decay=weight_decay)
+    if name == 'sgd':
+        return optim.SGD(params, lr=lr, momentum=momentum, weight_decay=weight_decay, nesterov=True)
+    raise ValueError(f"Unknown optimizer: {name}")
+
+
+def build_scheduler(optimizer, name: str, epochs: int, step_size: int, gamma: float):
+    name = name.lower()
+    if name == 'cosine':
+        return CosineAnnealingLR(optimizer, T_max=epochs)
+    if name == 'step':
+        return StepLR(optimizer, step_size=step_size, gamma=gamma)
+    if name == 'plateau':
+        return ReduceLROnPlateau(optimizer, mode='min', factor=gamma, patience=3)
+    if name == 'none':
+        return None
+    raise ValueError(f"Unknown scheduler: {name}")
+
 
 def main():
     args = parse_args()
+    set_seed(args.seed)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    class_map = {'Potato___healthy': 0,
-                 'Potato___Early_blight': 1,
-                 'Pepper,_bell___Bacterial_spot': 2,
-                 'Tomato___Tomato_mosaic_virus': 3,
-                 'Tomato___Spider_mites Two-spotted_spider_mite': 4,
-                 'Tomato___Late_blight': 5,
-                 'Strawberry___healthy': 6,
-                 'Grape___Leaf_blight_(Isariopsis_Leaf_Spot)': 7,
-                 'Apple___Cedar_apple_rust': 8,
-                 'Orange___Haunglongbing_(Citrus_greening)': 9,
-                 'Tomato___Tomato_Yellow_Leaf_Curl_Virus': 10,
-                 'Tomato___Leaf_Mold': 11,
-                 'Squash___Powdery_mildew': 12,
-                 'Apple___Apple_scab': 13,
-                 'Peach___Bacterial_spot': 14,
-                 'Soybean___healthy': 15,
-                 'Cherry_(including_sour)___Powdery_mildew': 16,
-                 'Peach___healthy': 17,
-                 'Raspberry___healthy': 18,
-                 'Corn_(maize)___Common_rust_': 19,
-                 'Tomato___Early_blight': 20,
-                 'Grape___healthy': 21,
-                 'Cherry_(including_sour)___healthy': 22,
-                 'Tomato___Target_Spot': 23,
-                 'Pepper,_bell___healthy': 24,
-                 'Tomato___healthy': 25,
-                 'Strawberry___Leaf_scorch': 26,
-                 'Corn_(maize)___healthy': 27,
-                 'Apple___Black_rot': 28,
-                 'Blueberry___healthy': 29,
-                 'Apple___healthy': 30,
-                 'Potato___Late_blight': 31,
-                 'Grape___Black_rot': 32,
-                 'Tomato___Septoria_leaf_spot': 33,
-                 'Corn_(maize)___Cercospora_leaf_spot Gray_leaf_spot': 34,
-                 'Tomato___Bacterial_spot': 35,
-                 'Grape___Esca_(Black_Measles)': 36,
-                 'Corn_(maize)___Northern_Leaf_Blight': 37}
+    pin_mem = bool(args.pin_memory) and torch.cuda.is_available()
 
     # Transforms
-    prob = 0.5
-    image_size = 224  # define your size
+    train_tf, val_tf = build_transforms(img_size=args.img_size, aug_level="medium")
 
-    train_tf = transforms.Compose([transforms.Resize((image_size, image_size)),
-                                   transforms.RandomApply(torch.nn.ModuleList([transforms.RandomHorizontalFlip(p=1.0),
-                                                                               transforms.RandomPerspective(distortion_scale=0.1, p=1.0),
-                                                                               transforms.RandomRotation(degrees=10),
-                                                                               transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5))
-                                                                              ]), p=prob
-                                                         ),
-                                    transforms.ColorJitter(brightness=0.3, hue=0.1),
-                                    transforms.ToTensor(),
-                                    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                                         std=[0.229, 0.224, 0.225]
-                                                        )
-                                  ])
-
-    test_tf = transforms.Compose([transforms.Resize((image_size, image_size)),
-                              transforms.ToTensor(),
-                              transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                                   std=[0.229, 0.224, 0.225])
-                            ])
+    # Datasets (class_map=None => infer classes from folders, sorted)
+    train_ds = PlantDataset(args.data_dir, args.train_split, class_map=None, transform=train_tf)
+    val_ds   = PlantDataset(args.data_dir, args.val_split,   class_map=None, transform=val_tf)
+    num_classes = len(train_ds.classes)
 
     # DataLoaders
-    train_set = PlantDataset(args.data_dir, "train", class_map, train_tf)
-    val_set = PlantDataset(args.data_dir, "test", class_map, test_tf)
-    train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True,
-                              num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_set, batch_size=args.batch_size, num_workers=4, pin_memory=True)
+    train_loader = DataLoader(
+        train_ds, batch_size=args.batch_size, shuffle=True,
+        num_workers=args.workers, pin_memory=pin_mem
+    )
+    val_loader = DataLoader(
+        val_ds, batch_size=args.batch_size, shuffle=False,
+        num_workers=args.workers, pin_memory=pin_mem
+    )
 
-    # Model, optimizer, criterion, scheduler
-    model = MobileViTClassifier(num_classes=len(class_map)).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    criterion = torch.nn.CrossEntropyLoss()
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
+    # Model
+    model = MobileViTClassifier(image_size=(args.img_size, args.img_size),
+                                num_classes=num_classes).to(device)
+
+    # Criterion (optional class weights for imbalance)
+    if args.use_class_weights and hasattr(train_ds, "class_weights"):
+        weights = train_ds.class_weights().to(device)
+    else:
+        weights = None
+    criterion = torch.nn.CrossEntropyLoss(weight=weights)
+
+    # Optimizer / Scheduler
+    optimizer = build_optimizer(model.parameters(), args.optimizer, args.lr, args.weight_decay)
+    scheduler = build_scheduler(optimizer, args.scheduler, args.epochs, args.step_size, args.gamma)
 
     # Trainer
-    trainer = trainer(model, optimizer, criterion, scheduler,
-                      train_loader, val_loader, device,
-                      output_dir='outputs', resume_ckpt=args.resume)
+    tr = Trainer(
+        model, optimizer, criterion, scheduler,
+        train_loader, val_loader, device,
+        output_dir='outputs',
+        resume_ckpt=args.resume,
+        amp=args.amp,
+        grad_clip_norm=(args.grad_clip if args.grad_clip and args.grad_clip > 0 else None),
+        accum_steps=max(1, args.accum_steps),
+        early_stopping_patience=(args.early_stop if args.early_stop > 0 else None),
+        save_every=args.save_every
+    )
 
-    trainer.train(epochs=args.epochs)
+    tr.train(args.epochs)
+
 
 if __name__ == "__main__":
     main()
-
-
-

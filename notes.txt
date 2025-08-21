@@ -1,5 +1,20 @@
-# Run training process
-docker build -t plant-disease-train:latest .
-docker run --gpus all \
-  -v $(pwd)/outputs:/workspace/outputs \
-  -it --rm plant-disease-train:latest
+├── config.py
+├── data/ # put dataset here (ImageFolder layout)
+├── datasets/
+│ └── plant_dataset.py
+├── Dockerfile
+├── eval.py
+├── main.py
+├── models/
+│ ├── init.py
+│ └── mobilevit.py
+├── outputs/
+│ ├── checkpoints/
+│ └── logs/
+├── README.md
+├── requirements.txt
+├── train.py
+└── utils/
+├──    metrics.py
+├──    trainer.py
+└──    transformrs.py

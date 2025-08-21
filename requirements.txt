@@ -1,9 +1,7 @@
-torch>=2.0
-torchvision
-timm
-pandas
-numpy
-einops
-scikit-learn
-matplotlib
-Pillow
+timm==0.9.16
+einops>=0.7.0
+scikit-learn==1.4.2
+pandas>=2.0
+numpy>=1.26,<2.0
+matplotlib>=3.7
+Pillow>=9.5
