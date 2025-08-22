@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 
 from models.mobilevit import MobileViTClassifier
 from datasets.plant_dataset import PlantDataset
-from utils.transformrs import build_transforms
+from utils.transforms import build_transforms
 from utils.trainer import trainer as Trainer
 
 

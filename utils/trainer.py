@@ -4,6 +4,7 @@ import csv
 import time
 import math
 from pathlib import Path
+import torch.optim.lr_scheduler as lrs
 
 import torch
 import numpy as np
@@ -128,9 +129,9 @@ class trainer:
 
             # Scheduler step (after val)
             if self.sched is not None:
-                try:
-                    self.sched.step(val_loss)  # supports ReduceLROnPlateau
-                except TypeError:
+                if isinstance(self.sched, lrs.ReduceLROnPlateau):
+                    self.sched.step(val_loss)   # only this one needs the metric
+                else:
                     self.sched.step()          # cosine/step schedulers
 
         # Save final (last) checkpoint

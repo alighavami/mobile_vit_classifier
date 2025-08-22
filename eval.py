@@ -16,7 +16,7 @@ except Exception:
 
 from datasets.plant_dataset import PlantDataset
 from models.mobilevit import MobileViTClassifier
-from utils.transformrs import inference_transform
+from utils.transforms import inference_transform
 
 
 def parse_args():
