@@ -1,0 +1,26 @@
+.
+├── config.py
+├── datasets
+│   └── plant_dataset.py
+├── Dockerfile
+├── eval.py
+├── .gitignore
+├── infer.py
+├── main.py
+├── models
+│   ├── __init__.py
+│   └── mobilevit.py
+├── notes.txt
+├── project_src.zip
+├── README.md
+├── requirements.txt
+├── sample.jpg
+├── structure.txt
+├── test_training_proc.ipynb
+├── train.py
+└── utils
+    ├── metrics.py
+    ├── trainer.py
+    └── transforms.py
+
+4 directories, 20 files

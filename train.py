@@ -18,9 +18,9 @@ def parse_args():
     p = argparse.ArgumentParser(description="Train MobileViT for Plant Disease Classification")
 
     # data
-    p.add_argument('--data-dir', type=str, default='data/PlantVillage')
+    p.add_argument('--data-dir', type=str, default='data/village_doc')
     p.add_argument('--train-split', type=str, default='train')
-    p.add_argument('--val-split', type=str, default='test')
+    p.add_argument('--val-split', type=str, default='val')
 
     # model / input
     p.add_argument('--img-size', type=int, default=224)

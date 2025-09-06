@@ -43,7 +43,7 @@ def add_train_subparser(subparsers):
 def add_eval_subparser(subparsers):
     p = subparsers.add_parser("eval", help="Evaluate a trained checkpoint")
     p.add_argument("--model", type=str, default="outputs/checkpoints/best.pth")
-    p.add_argument("--data-dir", type=str, default="data/PlantVillage")
+    p.add_argument("--data-dir", type=str, default="data/village_doc")
     p.add_argument("--split", type=str, default="test")
     p.add_argument("--img-size", type=int, default=224)
     p.add_argument("--batch-size", type=int, default=64)
